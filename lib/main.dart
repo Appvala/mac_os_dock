@@ -62,15 +62,37 @@ class Dock<T extends Object> extends StatefulWidget {
 /// State class to handle the dock's reordering and animations.
 class _DockState<T extends Object> extends State<Dock<T>> {
   // Internal list of items to manage the order dynamically.
-  late final List<T> _items = widget.items.toList();
+  final List<T> _items = [];
 
   // Tracks the index of the item being hovered over for placeholder display.
   int? _hoveringIndex;
+
   // Tracks the data of the currently dragged item.
   T? _draggingItem;
 
+  // Animation duration for the position changes.
+  final Duration _animationDuration = const Duration(milliseconds: 300);
+
+  // Dimensions for the items and margins
+  final double _itemWidth = 48;
+  final double _itemMargin = 8;
+
+  @override
+  void initState() {
+    super.initState();
+    _items.addAll(widget.items);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Calculate the total number of positions (items + placeholder if present)
+    int totalPositions = _items.length +
+        (_hoveringIndex != null ? 1 : 0) -
+        (_draggingItem != null ? 1 : 0);
+
+    // Calculate the total width of the dock based on the number of items
+    double dockWidth = totalPositions * (_itemWidth + 2 * _itemMargin);
+
     return DragTarget<T>(
       onWillAcceptWithDetails: (details) => true,
       onAcceptWithDetails: (details) {
@@ -91,7 +113,7 @@ class _DockState<T extends Object> extends State<Dock<T>> {
       onMove: (details) {
         final renderBox = context.findRenderObject() as RenderBox;
         final localPosition = renderBox.globalToLocal(details.offset);
-        int newIndex = (localPosition.dx / (48 + 16)).floor();
+        int newIndex = (localPosition.dx / (_itemWidth + 2)).floor();
         newIndex = newIndex.clamp(0, _items.length);
         if (newIndex != _hoveringIndex) {
           setState(() {
@@ -100,14 +122,16 @@ class _DockState<T extends Object> extends State<Dock<T>> {
         }
       },
       builder: (context, candidateData, rejectedData) {
-        return Container(
+        return AnimatedContainer(
+          duration: _animationDuration,
+          curve: Curves.easeInOut,
+          width: dockWidth,
+          height: _itemWidth + 2 * _itemMargin,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             color: Colors.black12,
           ),
-          padding: const EdgeInsets.all(4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Stack(
             children: _buildDockItems(),
           ),
         );
@@ -125,14 +149,29 @@ class _DockState<T extends Object> extends State<Dock<T>> {
       itemsToDisplay.remove(_draggingItem);
     }
 
-    for (var index = 0; index <= itemsToDisplay.length; index++) {
+    double leftPosition = 0;
+
+    int totalItems = itemsToDisplay.length + (_hoveringIndex != null ? 1 : 0);
+
+    for (var index = 0; index < totalItems; index++) {
       // Add placeholder at the hovering index
-      if (_hoveringIndex == index) {
-        dockItems.add(_buildPlaceholder());
-      }
-      if (index < itemsToDisplay.length) {
-        final item = itemsToDisplay[index];
-        dockItems.add(_buildDraggableItem(item));
+      if (_hoveringIndex != null && index == _hoveringIndex) {
+        dockItems.add(
+          _buildPlaceholder(leftPosition),
+        );
+        leftPosition += _itemWidth + 2 * _itemMargin;
+      } else {
+        int itemIndex = index;
+        if (_hoveringIndex != null && index > _hoveringIndex!) {
+          itemIndex -= 1;
+        }
+        if (itemIndex < itemsToDisplay.length) {
+          final item = itemsToDisplay[itemIndex];
+          dockItems.add(
+            _buildAnimatedDockItem(item, leftPosition),
+          );
+          leftPosition += _itemWidth + 2 * _itemMargin;
+        }
       }
     }
 
@@ -140,13 +179,27 @@ class _DockState<T extends Object> extends State<Dock<T>> {
   }
 
   /// Builds an animated placeholder to create space for dragging effects.
-  Widget _buildPlaceholder() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: 48,
-      height: 48,
-      margin: const EdgeInsets.all(8),
+  Widget _buildPlaceholder(double leftPosition) {
+    return AnimatedPositioned(
+      key: const ValueKey('placeholder'),
+      duration: _animationDuration,
+      curve: Curves.easeInOut,
+      left: leftPosition,
+      child: SizedBox(
+        width: _itemWidth + 2 * _itemMargin,
+        height: _itemWidth + 2 * _itemMargin,
+      ),
+    );
+  }
+
+  /// Builds each draggable item in the dock and handles drag events.
+  Widget _buildAnimatedDockItem(T item, double leftPosition) {
+    return AnimatedPositioned(
+      key: ValueKey(item),
+      duration: _animationDuration,
       curve: Curves.easeOut,
+      left: leftPosition,
+      child: _buildDraggableItem(item),
     );
   }
 
@@ -162,7 +215,7 @@ class _DockState<T extends Object> extends State<Dock<T>> {
       onDragStarted: () {
         setState(() {
           _draggingItem = item;
-          _hoveringIndex = _items.indexOf(item);
+          _hoveringIndex = null;
         });
       },
       onDragEnd: (_) {
